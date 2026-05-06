@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+
+build/
+dist/
+*.spec
+
+config.json
+token_stats.json
+
+.venv/
+venv/
+env/
+
+*.log
