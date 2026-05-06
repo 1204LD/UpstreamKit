@@ -1,6 +1,7 @@
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -23,6 +24,8 @@ except ImportError:
 APP_NAME = "UpstreamKit"
 DEFAULT_PORT = "8787"
 LOG_PREVIEW_LIMIT = 1200
+SAFE_USER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+UNSAFE_USER_ID_CHAR_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 
 def app_dir():
@@ -107,6 +110,51 @@ def request_summary(body):
         f"tools={len(tools) if isinstance(tools, list) else 'n/a'}, "
         f"max_tokens={body.get('max_tokens')}"
     )
+
+
+def sanitize_user_id_value(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if SAFE_USER_ID_RE.match(text):
+        return text
+    sanitized = UNSAFE_USER_ID_CHAR_RE.sub("_", text).strip("_")
+    if not sanitized:
+        return None
+    return sanitized[:128]
+
+
+def sanitize_user_id_fields(body):
+    changes = []
+    if not isinstance(body, dict):
+        return changes
+
+    metadata = body.get("metadata")
+    if isinstance(metadata, dict) and "user_id" in metadata:
+        original = metadata.get("user_id")
+        sanitized = sanitize_user_id_value(original)
+        if sanitized:
+            metadata["user_id"] = sanitized
+            if sanitized != original:
+                changes.append(f"metadata.user_id: {original!r} -> {sanitized!r}")
+        else:
+            metadata.pop("user_id", None)
+            changes.append(f"metadata.user_id: {original!r} -> removed")
+
+    if "user_id" in body:
+        original = body.get("user_id")
+        sanitized = sanitize_user_id_value(original)
+        if sanitized:
+            body["user_id"] = sanitized
+            if sanitized != original:
+                changes.append(f"user_id: {original!r} -> {sanitized!r}")
+        else:
+            body.pop("user_id", None)
+            changes.append(f"user_id: {original!r} -> removed")
+
+    return changes
 
 
 def rough_token_count(body):
@@ -497,6 +545,8 @@ class RelayHandler(BaseHTTPRequestHandler):
     def handle_anthropic_provider(self, raw_body, body, cfg):
         body = dict(body)
         body["model"] = cfg.model
+        for change in sanitize_user_id_fields(body):
+            self.server.state.log(f"[{getattr(self, 'request_id', 'no-id')}] 已修正 user_id：{change}")
         target = join_url(cfg.base_url, self.path if self.path.startswith("/v1/") else "/v1/messages")
         self.server.state.log(
             f"[{getattr(self, 'request_id', 'no-id')}] 转发到 Anthropic 上游 {target}；"
@@ -509,6 +559,8 @@ class RelayHandler(BaseHTTPRequestHandler):
         if self.path.endswith("/chat/completions"):
             outgoing = dict(body)
             outgoing["model"] = cfg.model
+            for change in sanitize_user_id_fields(outgoing):
+                self.server.state.log(f"[{getattr(self, 'request_id', 'no-id')}] 已修正 user_id：{change}")
         else:
             outgoing = anthropic_to_openai_request(body, cfg.model)
 

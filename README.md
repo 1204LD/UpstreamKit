@@ -2,9 +2,9 @@
 
 一个 Windows GUI API 中转工具，用于配置上游模型接口、转发请求、记录日志和统计 token。
 可用于Claudecode Desktop中转
-![](png\ScreenShot1.png)
+![](png/ScreenShot1.png)
 
-![](png\ScreenShot2.png)
+![](png/ScreenShot2.png)
 
 ## 使用
 
